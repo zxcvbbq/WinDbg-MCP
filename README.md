@@ -24,7 +24,7 @@ cargo build --release --locked
 The executable speaks MCP JSON-RPC on stdout; diagnostics are written to
 stderr.
 
-## Marketplace installation
+## Installation
 
 The repository contains marketplace catalogs for both clients:
 
