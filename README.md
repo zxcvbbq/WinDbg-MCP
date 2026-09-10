@@ -24,25 +24,6 @@ cargo build --release --locked
 The executable speaks MCP JSON-RPC on stdout; diagnostics are written to
 stderr.
 
-## Releases
-
-Create a version tag to build and publish the Windows x64 release executable:
-
-```powershell
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-GitHub Actions publishes `windbg-mcp-x86_64-pc-windows-msvc.exe` and its
-SHA-256 checksum in the repository's Releases tab.
-
-To use a downloaded release directly:
-
-```powershell
-codex mcp add windbg -- C:\Path\To\windbg-mcp-x86_64-pc-windows-msvc.exe
-claude mcp add --scope user windbg -- C:\Path\To\windbg-mcp-x86_64-pc-windows-msvc.exe
-```
-
 ## Marketplace installation
 
 The repository contains marketplace catalogs for both clients:
