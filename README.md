@@ -50,14 +50,14 @@ installation. Use `-ServerName another-name` to choose a different MCP name,
 or `-SkipBuild` when the release binary already exists.
 
 This repository also contains native plugin manifests for marketplace-based
-installation. After publishing it to GitHub, install it without editing a
-configuration file manually:
+installation. It is published at `zxcvbbq/WinDbg-MCP`; install it without
+editing a configuration file manually:
 
 ```powershell
-claude plugin marketplace add <owner>/windbg-mcp
+claude plugin marketplace add zxcvbbq/WinDbg-MCP
 claude plugin install windbg-mcp@windbg-mcp
 
-codex plugin marketplace add <owner>/windbg-mcp
+codex plugin marketplace add zxcvbbq/WinDbg-MCP
 codex plugin add windbg-mcp@windbg-mcp
 ```
 
