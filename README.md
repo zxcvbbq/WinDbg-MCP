@@ -33,6 +33,9 @@ The repository contains marketplace catalogs for both clients:
 
 Install from the published GitHub repository:
 
+Marketplace installs use the prebuilt release executable and do not compile
+Rust. Rust is only needed when building from source.
+
 ```powershell
 claude plugin marketplace add zxcvbbq/WinDbg-MCP
 claude plugin uninstall windbg-mcp@zxcvbbq

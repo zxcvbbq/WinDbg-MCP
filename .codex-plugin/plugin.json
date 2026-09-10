@@ -1,6 +1,6 @@
 {
   "name": "windbg-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "WinDbg MCP server backed by Microsoft's Windows Debugger Engine.",
   "author": {
     "name": "WinDbg MCP contributors"

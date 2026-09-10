@@ -1,19 +1,23 @@
 {
   "name": "windbg-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "WinDbg MCP server backed by Microsoft's Windows Debugger Engine.",
   "author": {
     "name": "WinDbg MCP contributors"
   },
   "mcpServers": {
     "windbg": {
-      "command": "cargo",
+      "command": "powershell.exe",
       "args": [
-        "run",
-        "--release",
-        "--manifest-path",
-        "${CLAUDE_PLUGIN_ROOT}/Cargo.toml"
-      ]
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "$ErrorActionPreference='Stop'; $cache=Join-Path $env:LOCALAPPDATA 'WinDbg-MCP\\0.1.1'; $exe=Join-Path $cache 'windbg-mcp.exe'; if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { New-Item -ItemType Directory -Force -Path $cache | Out-Null; $download=Join-Path $cache 'windbg-mcp.exe.download'; $downloadHash=Join-Path $cache 'windbg-mcp.exe.download.sha256'; Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/zxcvbbq/WinDbg-MCP/releases/download/v0.1.1/windbg-mcp-x86_64-pc-windows-msvc.exe' -OutFile $download; Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/zxcvbbq/WinDbg-MCP/releases/download/v0.1.1/windbg-mcp-x86_64-pc-windows-msvc.exe.sha256' -OutFile $downloadHash; $expected=((Get-Content -LiteralPath $downloadHash -Raw).Trim().Split(' ')[0]).ToLowerInvariant(); $actual=(Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash.ToLowerInvariant(); if ($actual -ne $expected) { Remove-Item -LiteralPath $download,$downloadHash -Force; throw 'WinDbg MCP checksum verification failed' }; Move-Item -LiteralPath $download -Destination $exe -Force; Move-Item -LiteralPath $downloadHash -Destination (Join-Path $cache 'windbg-mcp.exe.sha256') -Force }; & $exe"
+      ],
+      "env": {}
     }
   }
 }
