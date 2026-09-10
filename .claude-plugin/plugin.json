@@ -1,0 +1,19 @@
+{
+  "name": "windbg-mcp",
+  "version": "0.1.0",
+  "description": "WinDbg MCP server backed by Microsoft's Windows Debugger Engine.",
+  "author": {
+    "name": "WinDbg MCP contributors"
+  },
+  "mcpServers": {
+    "windbg": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--release",
+        "--manifest-path",
+        "${CLAUDE_PLUGIN_ROOT}/Cargo.toml"
+      ]
+    }
+  }
+}

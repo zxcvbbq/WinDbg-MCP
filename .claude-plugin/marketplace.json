@@ -1,0 +1,27 @@
+{
+  "name": "windbg-mcp",
+  "owner": {
+    "name": "WinDbg MCP contributors"
+  },
+  "metadata": {
+    "description": "A Claude Code marketplace for the WinDbg MCP server."
+  },
+  "plugins": [
+    {
+      "name": "windbg-mcp",
+      "source": "./",
+      "description": "WinDbg MCP server backed by Microsoft's Windows Debugger Engine.",
+      "version": "0.1.0",
+      "author": {
+        "name": "WinDbg MCP contributors"
+      },
+      "category": "Developer Tools",
+      "tags": [
+        "windbg",
+        "debugging",
+        "dbgeng",
+        "mcp"
+      ]
+    }
+  ]
+}

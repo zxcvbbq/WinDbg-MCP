@@ -1,0 +1,15 @@
+{
+  "name": "windbg-mcp",
+  "interface": {
+    "displayName": "WinDbg MCP Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "windbg-mcp",
+      "source": {
+        "source": "local",
+        "path": "./"
+      }
+    }
+  ]
+}

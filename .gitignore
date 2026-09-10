@@ -1,0 +1,7 @@
+/target/
+*.pdb
+*.dmp
+*.mdmp
+*.hdmp
+.env
+

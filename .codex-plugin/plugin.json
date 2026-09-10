@@ -1,0 +1,27 @@
+{
+  "name": "windbg-mcp",
+  "version": "0.1.0",
+  "description": "WinDbg MCP server backed by Microsoft's Windows Debugger Engine.",
+  "author": {
+    "name": "WinDbg MCP contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "windbg",
+    "debugging",
+    "dbgeng",
+    "mcp"
+  ],
+  "interface": {
+    "displayName": "WinDbg MCP",
+    "shortDescription": "Connect Codex to Windows Debugger Engine sessions.",
+    "longDescription": "A structured WinDbg MCP server for dump analysis, live debugging, frontend sessions, symbols, memory, breakpoints, and native commands.",
+    "developerName": "WinDbg MCP contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "MCP"
+    ]
+  },
+  "mcpServers": "./.codex-plugin/mcp.json"
+}

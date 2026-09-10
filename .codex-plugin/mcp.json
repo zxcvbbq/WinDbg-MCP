@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "windbg": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--release"
+      ],
+      "cwd": "."
+    }
+  }
+}
