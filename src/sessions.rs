@@ -17,6 +17,8 @@ use crate::ipc::{
 };
 
 const WORKER_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
+const MAX_COMMAND_TIMEOUT: Duration = Duration::from_secs(1800);
 const MAX_SESSIONS: usize = 4;
 
 #[derive(Clone)]
@@ -441,17 +443,28 @@ impl SessionManager {
         }
     }
 
-    pub async fn execute_command(&self, id: &str, command: &str) -> anyhow::Result<CommandResult> {
+    pub async fn execute_command(
+        &self,
+        id: &str,
+        command: &str,
+        timeout_ms: Option<u32>,
+    ) -> anyhow::Result<CommandResult> {
         validate_text("command", command, 4096)?;
-        match self
-            .request(
-                id,
-                WorkerRequest::ExecuteCommand {
-                    command: command.trim().to_string(),
-                },
-            )
-            .await?
-        {
+        let timeout = command_timeout(timeout_ms)?;
+        let request = WorkerRequest::ExecuteCommand {
+            command: command.trim().to_string(),
+        };
+        let response = self.request_with_timeout(id, request, timeout).await;
+        if let Err(error) = &response {
+            if error.to_string().contains("DbgEng worker timed out") {
+                self.abort_session(id).await;
+                return Err(anyhow!(
+                    "command_timeout: DbgEng did not finish within {} ms; the debugger session was closed to recover. Retry with a larger timeout_ms",
+                    timeout.as_millis()
+                ));
+            }
+        }
+        match response? {
             WorkerResponse::CommandOutput(value) => Ok(value),
             WorkerResponse::Error { code, message } => bail!("{code}: {message}"),
             other => bail!("unexpected worker response for command: {other:?}"),
@@ -489,6 +502,15 @@ impl SessionManager {
     }
 
     async fn request(&self, id: &str, request: WorkerRequest) -> anyhow::Result<WorkerResponse> {
+        self.request_with_timeout(id, request, WORKER_TIMEOUT).await
+    }
+
+    async fn request_with_timeout(
+        &self,
+        id: &str,
+        request: WorkerRequest,
+        timeout_duration: Duration,
+    ) -> anyhow::Result<WorkerResponse> {
         let entry = self
             .sessions
             .read()
@@ -496,12 +518,33 @@ impl SessionManager {
             .get(id)
             .cloned()
             .ok_or_else(|| anyhow!("stale_session: unknown session_id '{id}'"))?;
-        entry.worker.lock().await.request(&request).await
+        entry
+            .worker
+            .lock()
+            .await
+            .request_with_timeout(&request, timeout_duration)
+            .await
+    }
+
+    async fn abort_session(&self, id: &str) {
+        let Some(entry) = self.sessions.write().await.remove(id) else {
+            return;
+        };
+        let mut worker = entry.worker.lock().await;
+        let _ = worker.child.start_kill();
     }
 }
 
 impl WorkerConnection {
     async fn request(&mut self, request: &WorkerRequest) -> anyhow::Result<WorkerResponse> {
+        self.request_with_timeout(request, WORKER_TIMEOUT).await
+    }
+
+    async fn request_with_timeout(
+        &mut self,
+        request: &WorkerRequest,
+        timeout_duration: Duration,
+    ) -> anyhow::Result<WorkerResponse> {
         let mut encoded = serde_json::to_vec(request).context("failed to encode worker request")?;
         encoded.push(b'\n');
         self.stdin
@@ -514,7 +557,7 @@ impl WorkerConnection {
             .context("failed to flush worker request")?;
 
         let mut line = String::new();
-        let bytes = timeout(WORKER_TIMEOUT, self.stdout.read_line(&mut line))
+        let bytes = timeout(timeout_duration, self.stdout.read_line(&mut line))
             .await
             .context("DbgEng worker timed out")??;
         if bytes == 0 {
@@ -522,6 +565,22 @@ impl WorkerConnection {
         }
         serde_json::from_str(&line).context("worker returned invalid JSON")
     }
+}
+
+fn command_timeout(timeout_ms: Option<u32>) -> anyhow::Result<Duration> {
+    let timeout = timeout_ms
+        .map(|milliseconds| Duration::from_millis(u64::from(milliseconds)))
+        .unwrap_or(DEFAULT_COMMAND_TIMEOUT);
+    if timeout.is_zero() {
+        bail!("invalid_argument: timeout_ms must be greater than zero");
+    }
+    if timeout > MAX_COMMAND_TIMEOUT {
+        bail!(
+            "invalid_argument: timeout_ms must be at most {}",
+            MAX_COMMAND_TIMEOUT.as_millis()
+        );
+    }
+    Ok(timeout)
 }
 
 fn validate_dump_path(supplied: &str) -> anyhow::Result<std::path::PathBuf> {
@@ -646,5 +705,26 @@ mod tests {
     fn frontend_connection_rejects_remote_host() {
         let error = validate_frontend_connection("npipe:server=remote,pipe=debug").unwrap_err();
         assert!(error.to_string().contains("this computer"));
+    }
+
+    #[test]
+    fn command_timeout_defaults_to_five_minutes() {
+        assert_eq!(command_timeout(None).unwrap(), Duration::from_secs(300));
+    }
+
+    #[test]
+    fn command_timeout_rejects_zero_and_values_over_thirty_minutes() {
+        assert!(
+            command_timeout(Some(0))
+                .unwrap_err()
+                .to_string()
+                .contains("greater than zero")
+        );
+        assert!(
+            command_timeout(Some(1_800_001))
+                .unwrap_err()
+                .to_string()
+                .contains("at most 1800000")
+        );
     }
 }

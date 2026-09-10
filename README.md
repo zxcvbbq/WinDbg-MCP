@@ -72,7 +72,9 @@ bounded to 4096 bytes per request, and list and stack results are bounded to
 
 `windbg.execute_command` passes native WinDbg and extension commands directly
 to DbgEng, including commands that execute, mutate, log, dump, carve, or use
-the shell. Files are created only when the command requests them.
+the shell. Files are created only when the command requests them. Long-running
+commands use a five-minute timeout by default; pass `timeout_ms` up to
+`1800000` (30 minutes) when symbol loading or analysis needs longer.
 
 ## Existing WinDbg GUI sessions
 

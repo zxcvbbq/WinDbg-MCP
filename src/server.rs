@@ -197,6 +197,8 @@ pub struct ExecuteCommandParams {
     pub session_id: String,
     /// A native WinDbg command or extension command, for example "!analyze -v", "lm", "k", or "u @rip".
     pub command: String,
+    /// Maximum time to wait for DbgEng to finish the command in milliseconds. Defaults to 300000 (5 minutes), up to 1800000 (30 minutes).
+    pub timeout_ms: Option<u32>,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -740,10 +742,11 @@ impl WindbgServer {
         Parameters(ExecuteCommandParams {
             session_id,
             command,
+            timeout_ms,
         }): Parameters<ExecuteCommandParams>,
     ) -> Result<Json<SessionResult<CommandResult>>, String> {
         self.sessions
-            .execute_command(&session_id, &command)
+            .execute_command(&session_id, &command, timeout_ms)
             .await
             .map(|data| Json(SessionResult { session_id, data }))
             .map_err(|error| error.to_string())
