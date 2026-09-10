@@ -54,10 +54,12 @@ Install from the published GitHub repository:
 
 ```powershell
 claude plugin marketplace add zxcvbbq/WinDbg-MCP
-claude plugin install windbg-mcp@windbg-mcp
+claude plugin uninstall windbg-mcp@zxcvbbq
+claude plugin install windbg-mcp@zxcvbbq
 
 codex plugin marketplace add zxcvbbq/WinDbg-MCP
-codex plugin add windbg-mcp@windbg-mcp
+codex plugin remove windbg-mcp@zxcvbbq
+codex plugin add windbg-mcp@zxcvbbq
 ```
 
 ## Tools
