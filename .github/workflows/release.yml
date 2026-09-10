@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Rust MSVC toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+
+      - name: Build release binary
+        run: cargo build --locked --release
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          $asset = "windbg-mcp-x86_64-pc-windows-msvc.exe"
+          Copy-Item "target\release\windbg-mcp.exe" $asset
+          $hash = (Get-FileHash -LiteralPath $asset -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $asset" | Set-Content -LiteralPath "$asset.sha256" -NoNewline
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "windbg-mcp-x86_64-pc-windows-msvc.exe" `
+            "windbg-mcp-x86_64-pc-windows-msvc.exe.sha256" `
+            --title "${{ github.ref_name }}" `
+            --generate-notes
