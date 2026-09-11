@@ -58,7 +58,7 @@ Inspection and control:
 - `windbg.read_memory`, `windbg.write_memory`
 - `windbg.get_symbol_path`, `windbg.set_symbol_path`, `windbg.reload_symbols`
 - `windbg.list_breakpoints`, `windbg.set_breakpoint`, `windbg.set_breakpoint_enabled`, `windbg.remove_breakpoint`
-- `windbg.execute`, `windbg.execute_command`
+- `windbg.execute`, `windbg.wait_for_event`, `windbg.execute_command`
 
 All operations use an explicit `session_id`. Memory reads and writes are
 bounded to 4096 bytes per request, and list and stack results are bounded to

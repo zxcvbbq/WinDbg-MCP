@@ -48,10 +48,11 @@ use windows::{
 
 use crate::ipc::{
     BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
-    ContextSelection, DebugServerInfo, DebugServerList, Disassembly, DisassemblyInstruction,
-    ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite, ModuleInfo,
-    ModuleList, ProcessInfo, ProcessList, RegisterList, RegisterValue, SourceLocation, StackFrame,
-    StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary, ThreadInfo, ThreadList,
+    ContextSelection, DebugEvent, DebugServerInfo, DebugServerList, Disassembly,
+    DisassemblyInstruction, ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead,
+    MemoryWrite, ModuleInfo, ModuleList, ProcessInfo, ProcessList, RegisterList, RegisterValue,
+    SourceLocation, StackFrame, StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary,
+    ThreadInfo, ThreadList,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -1216,6 +1217,34 @@ impl EngineSession {
         };
         Ok(ExecutionResult {
             action,
+            execution_status: execution_status_name(status).to_string(),
+            stopped,
+            timed_out,
+            event_type,
+            event_process_engine_id: process_id,
+            event_thread_engine_id: thread_id,
+            event_description: description,
+        })
+    }
+
+    pub fn wait_for_event(&self, timeout_ms: u32) -> Result<DebugEvent, EngineError> {
+        unsafe { self.control.WaitForEvent(0, timeout_ms) }
+            .map_err(|error| EngineError::Query(error.to_string()))?;
+        let status = unsafe { self.control.GetExecutionStatus() }
+            .map_err(|error| EngineError::Query(error.to_string()))?;
+        let stopped = status == DEBUG_STATUS_BREAK || status == DEBUG_STATUS_NO_DEBUGGEE;
+        let timed_out = !stopped && status != DEBUG_STATUS_WAIT_INPUT;
+        let event = stopped.then(|| self.last_event()).transpose()?;
+        let (event_type, process_id, thread_id, description) = match event {
+            Some((event_type, process_id, thread_id, description)) => (
+                Some(event_type),
+                Some(process_id),
+                Some(thread_id),
+                Some(description),
+            ),
+            None => (None, None, None, None),
+        };
+        Ok(DebugEvent {
             execution_status: execution_status_name(status).to_string(),
             stopped,
             timed_out,

@@ -290,6 +290,12 @@ pub fn run() -> anyhow::Result<()> {
                 |session| session.execute(action, timeout_ms),
                 WorkerResponse::Execution,
             ),
+            WorkerRequest::WaitForEvent { timeout_ms } => with_engine(
+                engine.as_ref(),
+                "wait_for_event_failed",
+                |session| session.wait_for_event(timeout_ms),
+                WorkerResponse::Event,
+            ),
             WorkerRequest::ExecuteCommand { command } => with_engine(
                 engine.as_ref(),
                 "command_failed",

@@ -96,6 +96,9 @@ pub enum WorkerRequest {
         action: ExecutionAction,
         timeout_ms: u32,
     },
+    WaitForEvent {
+        timeout_ms: u32,
+    },
     ExecuteCommand {
         command: String,
     },
@@ -348,6 +351,17 @@ pub struct ExecutionResult {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct DebugEvent {
+    pub execution_status: String,
+    pub stopped: bool,
+    pub timed_out: bool,
+    pub event_type: Option<String>,
+    pub event_process_engine_id: Option<u32>,
+    pub event_thread_engine_id: Option<u32>,
+    pub event_description: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct CommandResult {
     pub command: String,
     pub output: String,
@@ -376,6 +390,7 @@ pub enum WorkerResponse {
     Breakpoint(BreakpointInfo),
     BreakpointRemoved { id: u32 },
     Execution(ExecutionResult),
+    Event(DebugEvent),
     CommandOutput(CommandResult),
     Closed,
     Error { code: String, message: String },

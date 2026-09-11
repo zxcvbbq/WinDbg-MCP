@@ -13,10 +13,10 @@ use crate::{
     dbgeng,
     ipc::{
         BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
-        ContextSelection, DebugServerList, Disassembly, ExecutionAction, ExecutionResult,
-        ExpressionValue, MemoryRead, MemoryWrite, ModuleList, ProcessList, RegisterList,
-        StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary, ThreadList,
-        WorkerRequest, WorkerResponse,
+        ContextSelection, DebugEvent, DebugServerList, Disassembly, ExecutionAction,
+        ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite, ModuleList, ProcessList,
+        RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary,
+        ThreadList, WorkerRequest, WorkerResponse,
     },
 };
 
@@ -581,6 +581,37 @@ impl SessionManager {
         }
     }
 
+    pub async fn wait_for_event(
+        &self,
+        id: &str,
+        timeout_ms: Option<u32>,
+    ) -> anyhow::Result<DebugEvent> {
+        let timeout = event_timeout(timeout_ms)?;
+        let response = self
+            .request_with_timeout(
+                id,
+                WorkerRequest::WaitForEvent {
+                    timeout_ms: timeout.as_millis() as u32,
+                },
+                timeout + Duration::from_secs(5),
+            )
+            .await;
+        if let Err(error) = &response {
+            if error.to_string().contains("DbgEng worker timed out") {
+                self.abort_session(id).await;
+                return Err(anyhow!(
+                    "event_wait_timeout: DbgEng did not return within {} ms; the debugger session was closed to recover",
+                    timeout.as_millis()
+                ));
+            }
+        }
+        match response? {
+            WorkerResponse::Event(value) => Ok(value),
+            WorkerResponse::Error { code, message } => bail!("{code}: {message}"),
+            other => bail!("unexpected worker response while waiting for an event: {other:?}"),
+        }
+    }
+
     pub async fn execute_command(
         &self,
         id: &str,
@@ -719,6 +750,10 @@ fn command_timeout(timeout_ms: Option<u32>) -> anyhow::Result<Duration> {
         );
     }
     Ok(timeout)
+}
+
+fn event_timeout(timeout_ms: Option<u32>) -> anyhow::Result<Duration> {
+    command_timeout(timeout_ms)
 }
 
 fn validate_dump_path(supplied: &str) -> anyhow::Result<std::path::PathBuf> {

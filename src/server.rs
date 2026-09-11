@@ -9,9 +9,10 @@ use crate::{
     dbgeng,
     ipc::{
         BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
-        ContextSelection, DebugServerList, Disassembly, ExecutionAction, ExecutionResult,
-        ExpressionValue, MemoryRead, MemoryWrite, ModuleList, ProcessList, RegisterList,
-        StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary, ThreadList,
+        ContextSelection, DebugEvent, DebugServerList, Disassembly, ExecutionAction,
+        ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite, ModuleList, ProcessList,
+        RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary,
+        ThreadList,
     },
     sessions::SessionManager,
 };
@@ -262,6 +263,13 @@ pub struct ExecuteParams {
     pub session_id: String,
     pub action: ExecutionAction,
     /// Maximum event wait in milliseconds, up to 20000. Defaults to 5000.
+    pub timeout_ms: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct EventWaitParams {
+    pub session_id: String,
+    /// Maximum wait in milliseconds. Defaults to 300000 (5 minutes), up to 1800000 (30 minutes).
     pub timeout_ms: Option<u32>,
 }
 
@@ -964,6 +972,24 @@ impl WindbgServer {
     ) -> Result<Json<SessionResult<ExecutionResult>>, String> {
         self.sessions
             .execute(&session_id, action, timeout_ms.unwrap_or(5000))
+            .await
+            .map(|data| Json(SessionResult { session_id, data }))
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.wait_for_event",
+        description = "Wait for the next debugger event without changing target execution. Call again to consume later events."
+    )]
+    async fn wait_for_event(
+        &self,
+        Parameters(EventWaitParams {
+            session_id,
+            timeout_ms,
+        }): Parameters<EventWaitParams>,
+    ) -> Result<Json<SessionResult<DebugEvent>>, String> {
+        self.sessions
+            .wait_for_event(&session_id, timeout_ms)
             .await
             .map(|data| Json(SessionResult { session_id, data }))
             .map_err(|error| error.to_string())
