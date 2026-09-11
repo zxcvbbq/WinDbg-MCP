@@ -77,9 +77,20 @@ pub enum WorkerRequest {
     SetBreakpoint {
         expression: String,
         one_shot: bool,
+        kind: BreakpointKind,
+        data_size: Option<u32>,
+        access: Option<BreakpointAccess>,
+        condition: Option<String>,
+        pass_count: Option<u32>,
+        match_thread: Option<u32>,
+        enabled: bool,
     },
     RemoveBreakpoint {
         id: u32,
+    },
+    SetBreakpointEnabled {
+        id: u32,
+        enabled: bool,
     },
     Execute {
         action: ExecutionAction,
@@ -117,6 +128,21 @@ pub struct DebugServerList {
     pub machine: String,
     pub servers: Vec<DebugServerInfo>,
     pub raw_output: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BreakpointKind {
+    Code,
+    Data,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BreakpointAccess {
+    Read,
+    Write,
+    ReadWrite,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -289,6 +315,9 @@ pub struct BreakpointInfo {
     pub match_thread: Option<u32>,
     pub pass_count: u32,
     pub current_pass_count: u32,
+    pub data_size: Option<u32>,
+    pub access: Option<String>,
+    pub command: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]

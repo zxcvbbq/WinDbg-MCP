@@ -57,7 +57,7 @@ Inspection and control:
 - `windbg.symbol_from_address`, `windbg.address_from_symbol`
 - `windbg.read_memory`, `windbg.write_memory`
 - `windbg.get_symbol_path`, `windbg.set_symbol_path`, `windbg.reload_symbols`
-- `windbg.list_breakpoints`, `windbg.set_breakpoint`, `windbg.remove_breakpoint`
+- `windbg.list_breakpoints`, `windbg.set_breakpoint`, `windbg.set_breakpoint_enabled`, `windbg.remove_breakpoint`
 - `windbg.execute`, `windbg.execute_command`
 
 All operations use an explicit `session_id`. Memory reads and writes are

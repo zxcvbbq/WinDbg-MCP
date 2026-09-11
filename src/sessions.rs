@@ -12,10 +12,11 @@ use uuid::Uuid;
 use crate::{
     dbgeng,
     ipc::{
-        BreakpointInfo, BreakpointList, CommandResult, ContextSelection, DebugServerList,
-        Disassembly, ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite,
-        ModuleList, ProcessList, RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
-        TargetSummary, ThreadList, WorkerRequest, WorkerResponse,
+        BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
+        ContextSelection, DebugServerList, Disassembly, ExecutionAction, ExecutionResult,
+        ExpressionValue, MemoryRead, MemoryWrite, ModuleList, ProcessList, RegisterList,
+        StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary, ThreadList,
+        WorkerRequest, WorkerResponse,
     },
 };
 
@@ -477,14 +478,47 @@ impl SessionManager {
         id: &str,
         expression: &str,
         one_shot: bool,
+        kind: BreakpointKind,
+        data_size: Option<u32>,
+        access: Option<BreakpointAccess>,
+        condition: Option<&str>,
+        pass_count: Option<u32>,
+        match_thread: Option<u32>,
+        enabled: bool,
     ) -> anyhow::Result<BreakpointInfo> {
         validate_text("expression", expression, 4096)?;
+        if let Some(condition) = condition {
+            validate_text("condition", condition, 4096)?;
+        }
+        if let Some(pass_count) = pass_count {
+            if pass_count == 0 {
+                bail!("invalid_argument: pass_count must be greater than zero");
+            }
+        }
+        match kind {
+            BreakpointKind::Code if data_size.is_some() || access.is_some() => {
+                bail!("invalid_argument: data_size and access require a data breakpoint")
+            }
+            BreakpointKind::Data => {
+                if !matches!(data_size, Some(1 | 2 | 4 | 8)) {
+                    bail!("invalid_argument: data_size must be 1, 2, 4, or 8");
+                }
+            }
+            BreakpointKind::Code => {}
+        }
         match self
             .request(
                 id,
                 WorkerRequest::SetBreakpoint {
                     expression: expression.to_string(),
                     one_shot,
+                    kind,
+                    data_size,
+                    access,
+                    condition: condition.map(str::to_string),
+                    pass_count,
+                    match_thread,
+                    enabled,
                 },
             )
             .await?
@@ -503,6 +537,28 @@ impl SessionManager {
             WorkerResponse::BreakpointRemoved { id } => Ok(id),
             WorkerResponse::Error { code, message } => bail!("{code}: {message}"),
             other => bail!("unexpected worker response while removing breakpoint: {other:?}"),
+        }
+    }
+
+    pub async fn set_breakpoint_enabled(
+        &self,
+        id: &str,
+        breakpoint_id: u32,
+        enabled: bool,
+    ) -> anyhow::Result<BreakpointInfo> {
+        match self
+            .request(
+                id,
+                WorkerRequest::SetBreakpointEnabled {
+                    id: breakpoint_id,
+                    enabled,
+                },
+            )
+            .await?
+        {
+            WorkerResponse::Breakpoint(value) => Ok(value),
+            WorkerResponse::Error { code, message } => bail!("{code}: {message}"),
+            other => bail!("unexpected worker response while changing breakpoint state: {other:?}"),
         }
     }
 

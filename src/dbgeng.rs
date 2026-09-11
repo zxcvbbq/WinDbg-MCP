@@ -10,7 +10,8 @@ use windows::{
     Win32::System::Diagnostics::Debug::{
         EXCEPTION_RECORD64,
         Extensions::{
-            DEBUG_ANY_ID, DEBUG_ATTACH_DEFAULT, DEBUG_ATTACH_NONINVASIVE, DEBUG_BREAKPOINT_CODE,
+            DEBUG_ANY_ID, DEBUG_ATTACH_DEFAULT, DEBUG_ATTACH_NONINVASIVE, DEBUG_BREAK_READ,
+            DEBUG_BREAK_WRITE, DEBUG_BREAKPOINT_CODE, DEBUG_BREAKPOINT_DATA,
             DEBUG_BREAKPOINT_DEFERRED, DEBUG_BREAKPOINT_ENABLED, DEBUG_BREAKPOINT_ONE_SHOT,
             DEBUG_CLASS_IMAGE_FILE, DEBUG_CLASS_KERNEL, DEBUG_CLASS_USER_WINDOWS,
             DEBUG_CONNECT_SESSION_NO_ANNOUNCE, DEBUG_CONNECT_SESSION_NO_VERSION,
@@ -46,11 +47,11 @@ use windows::{
 };
 
 use crate::ipc::{
-    BreakpointInfo, BreakpointList, CommandResult, ContextSelection, DebugServerInfo,
-    DebugServerList, Disassembly, DisassemblyInstruction, ExecutionAction, ExecutionResult,
-    ExpressionValue, MemoryRead, MemoryWrite, ModuleInfo, ModuleList, ProcessInfo, ProcessList,
-    RegisterList, RegisterValue, SourceLocation, StackFrame, StackTrace, SymbolLookup, SymbolPath,
-    SymbolReload, TargetSummary, ThreadInfo, ThreadList,
+    BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
+    ContextSelection, DebugServerInfo, DebugServerList, Disassembly, DisassemblyInstruction,
+    ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite, ModuleInfo,
+    ModuleList, ProcessInfo, ProcessList, RegisterList, RegisterValue, SourceLocation, StackFrame,
+    StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary, ThreadInfo, ThreadList,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -1076,25 +1077,62 @@ impl EngineSession {
         &self,
         expression: &str,
         one_shot: bool,
+        kind: BreakpointKind,
+        data_size: Option<u32>,
+        access: Option<BreakpointAccess>,
+        condition: Option<&str>,
+        pass_count: Option<u32>,
+        match_thread: Option<u32>,
+        enabled: bool,
     ) -> Result<BreakpointInfo, EngineError> {
-        let breakpoint = unsafe {
-            self.control
-                .AddBreakpoint2(DEBUG_BREAKPOINT_CODE, DEBUG_ANY_ID)
-        }
-        .map_err(|error| EngineError::Query(error.to_string()))?;
+        let break_type = match kind {
+            BreakpointKind::Code => DEBUG_BREAKPOINT_CODE,
+            BreakpointKind::Data => DEBUG_BREAKPOINT_DATA,
+        };
+        let breakpoint = unsafe { self.control.AddBreakpoint2(break_type, DEBUG_ANY_ID) }
+            .map_err(|error| EngineError::Query(error.to_string()))?;
         let mut wide: Vec<u16> = expression.encode_utf16().collect();
         wide.push(0);
-        let flags = DEBUG_BREAKPOINT_ENABLED
-            | if one_shot {
-                DEBUG_BREAKPOINT_ONE_SHOT
-            } else {
-                0
-            };
-        let configured = unsafe {
-            breakpoint
-                .SetOffsetExpressionWide(PCWSTR(wide.as_ptr()))
-                .and_then(|()| breakpoint.AddFlags(flags))
-        };
+        let configured = (|| {
+            unsafe { breakpoint.SetOffsetExpressionWide(PCWSTR(wide.as_ptr()))? };
+            if let BreakpointKind::Data = kind {
+                let data_size = data_size.ok_or_else(|| {
+                    windows::core::Error::new(
+                        windows::core::HRESULT(0x80070057u32 as i32),
+                        "data breakpoint size is required",
+                    )
+                })?;
+                let access = match access.unwrap_or(BreakpointAccess::Write) {
+                    BreakpointAccess::Read => DEBUG_BREAK_READ,
+                    BreakpointAccess::Write => DEBUG_BREAK_WRITE,
+                    BreakpointAccess::ReadWrite => DEBUG_BREAK_READ | DEBUG_BREAK_WRITE,
+                };
+                unsafe { breakpoint.SetDataParameters(data_size, access)? };
+            }
+            if let Some(condition) = condition {
+                let command = format!("j ({condition}) ''; 'gc'");
+                let mut wide_command: Vec<u16> = command.encode_utf16().collect();
+                wide_command.push(0);
+                unsafe { breakpoint.SetCommandWide(PCWSTR(wide_command.as_ptr()))? };
+            }
+            if let Some(pass_count) = pass_count {
+                unsafe { breakpoint.SetPassCount(pass_count)? };
+            }
+            if let Some(match_thread) = match_thread {
+                unsafe { breakpoint.SetMatchThreadId(match_thread)? };
+            }
+            let mut flags = 0;
+            if enabled {
+                flags |= DEBUG_BREAKPOINT_ENABLED;
+            }
+            if one_shot {
+                flags |= DEBUG_BREAKPOINT_ONE_SHOT;
+            }
+            if flags != 0 {
+                unsafe { breakpoint.AddFlags(flags)? };
+            }
+            Ok::<(), windows::core::Error>(())
+        })();
         if let Err(error) = configured {
             if unsafe { self.control.RemoveBreakpoint2(&breakpoint) }.is_ok() {
                 // DbgEng deletes breakpoint objects on removal; calling the
@@ -1118,6 +1156,24 @@ impl EngineSession {
         // lifetime. RemoveBreakpoint deletes it, so it must not be Released.
         std::mem::forget(breakpoint);
         Ok(id)
+    }
+
+    pub fn set_breakpoint_enabled(
+        &self,
+        id: u32,
+        enabled: bool,
+    ) -> Result<BreakpointInfo, EngineError> {
+        let breakpoint = unsafe { self.control.GetBreakpointById(id) }
+            .map_err(|error| EngineError::Query(error.to_string()))?
+            .cast::<IDebugBreakpoint2>()
+            .map_err(|error| EngineError::Query(error.to_string()))?;
+        if enabled {
+            unsafe { breakpoint.AddFlags(DEBUG_BREAKPOINT_ENABLED) }
+        } else {
+            unsafe { breakpoint.RemoveFlags(DEBUG_BREAKPOINT_ENABLED) }
+        }
+        .map_err(|error| EngineError::Query(error.to_string()))?;
+        self.breakpoint_info(&breakpoint)
     }
 
     pub fn execute(
@@ -1315,6 +1371,24 @@ impl EngineSession {
         }
         .ok()
         .map(|()| utf16_result(&expression_buffer, expression_used));
+        let (data_size, access) = if break_type == DEBUG_BREAKPOINT_DATA {
+            let mut size = 0;
+            let mut access = 0;
+            unsafe { breakpoint.GetDataParameters(&mut size, &mut access) }
+                .ok()
+                .map(|()| (Some(size), Some(breakpoint_access_name(access).to_string())))
+                .unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
+        let mut command_buffer = vec![0u16; 4096];
+        let mut command_used = 0;
+        let command = unsafe {
+            breakpoint.GetCommandWide(Some(&mut command_buffer), Some(&mut command_used))
+        }
+        .ok()
+        .map(|()| utf16_result(&command_buffer, command_used))
+        .filter(|value| !value.is_empty());
         let match_thread = unsafe { breakpoint.GetMatchThreadId() }
             .ok()
             .filter(|value| *value != DEBUG_ANY_ID);
@@ -1333,6 +1407,9 @@ impl EngineSession {
             match_thread,
             pass_count: unsafe { breakpoint.GetPassCount() }.unwrap_or(0),
             current_pass_count: unsafe { breakpoint.GetCurrentPassCount() }.unwrap_or(0),
+            data_size,
+            access,
+            command,
         })
     }
 
@@ -1416,6 +1493,15 @@ fn debuggee_class_name(value: u32) -> &'static str {
         DEBUG_CLASS_KERNEL => "kernel",
         DEBUG_CLASS_USER_WINDOWS => "user_windows",
         DEBUG_CLASS_IMAGE_FILE => "image_file",
+        _ => "unknown",
+    }
+}
+
+fn breakpoint_access_name(value: u32) -> &'static str {
+    match value {
+        DEBUG_BREAK_READ => "read",
+        DEBUG_BREAK_WRITE => "write",
+        value if value == (DEBUG_BREAK_READ | DEBUG_BREAK_WRITE) => "read_write",
         _ => "unknown",
     }
 }

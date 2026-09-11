@@ -247,10 +247,29 @@ pub fn run() -> anyhow::Result<()> {
             WorkerRequest::SetBreakpoint {
                 expression,
                 one_shot,
+                kind,
+                data_size,
+                access,
+                condition,
+                pass_count,
+                match_thread,
+                enabled,
             } => with_engine(
                 engine.as_ref(),
                 "set_breakpoint_failed",
-                |session| session.set_breakpoint(&expression, one_shot),
+                |session| {
+                    session.set_breakpoint(
+                        &expression,
+                        one_shot,
+                        kind,
+                        data_size,
+                        access,
+                        condition.as_deref(),
+                        pass_count,
+                        match_thread,
+                        enabled,
+                    )
+                },
                 WorkerResponse::Breakpoint,
             ),
             WorkerRequest::RemoveBreakpoint { id } => with_engine(
@@ -258,6 +277,12 @@ pub fn run() -> anyhow::Result<()> {
                 "remove_breakpoint_failed",
                 |session| session.remove_breakpoint(id),
                 |id| WorkerResponse::BreakpointRemoved { id },
+            ),
+            WorkerRequest::SetBreakpointEnabled { id, enabled } => with_engine(
+                engine.as_ref(),
+                "set_breakpoint_enabled_failed",
+                |session| session.set_breakpoint_enabled(id, enabled),
+                WorkerResponse::Breakpoint,
             ),
             WorkerRequest::Execute { action, timeout_ms } => with_engine(
                 engine.as_ref(),

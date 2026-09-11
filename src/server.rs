@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use crate::{
     dbgeng,
     ipc::{
-        BreakpointInfo, BreakpointList, CommandResult, ContextSelection, DebugServerList,
-        Disassembly, ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite,
-        ModuleList, ProcessList, RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
-        TargetSummary, ThreadList,
+        BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
+        ContextSelection, DebugServerList, Disassembly, ExecutionAction, ExecutionResult,
+        ExpressionValue, MemoryRead, MemoryWrite, ModuleList, ProcessList, RegisterList,
+        StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary, ThreadList,
     },
     sessions::SessionManager,
 };
@@ -228,12 +228,33 @@ pub struct SetBreakpointParams {
     /// Remove the breakpoint automatically after it fires once.
     #[serde(default)]
     pub one_shot: bool,
+    /// Software instruction breakpoint or processor data breakpoint.
+    pub kind: Option<BreakpointKind>,
+    /// Data breakpoint width in bytes. Valid values are 1, 2, 4, and 8.
+    pub data_size: Option<u32>,
+    /// Data access that triggers a data breakpoint.
+    pub access: Option<BreakpointAccess>,
+    /// Optional legacy DbgEng condition expression. False conditions continue execution.
+    pub condition: Option<String>,
+    /// Ignore this many hits before stopping.
+    pub pass_count: Option<u32>,
+    /// Restrict the breakpoint to a DbgEng thread ID.
+    pub match_thread: Option<u32>,
+    /// Create the breakpoint disabled.
+    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RemoveBreakpointParams {
     pub session_id: String,
     pub breakpoint_id: u32,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct BreakpointStateParams {
+    pub session_id: String,
+    pub breakpoint_id: u32,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -851,7 +872,7 @@ impl WindbgServer {
 
     #[tool(
         name = "windbg.set_breakpoint",
-        description = "Create and enable a code breakpoint from an address or symbol expression. This mutates debugger state and should require user approval."
+        description = "Create a code or data breakpoint with optional condition, pass count, thread filter, and enabled state. This mutates debugger state and should require user approval."
     )]
     async fn set_breakpoint(
         &self,
@@ -859,10 +880,28 @@ impl WindbgServer {
             session_id,
             expression,
             one_shot,
+            kind,
+            data_size,
+            access,
+            condition,
+            pass_count,
+            match_thread,
+            enabled,
         }): Parameters<SetBreakpointParams>,
     ) -> Result<Json<SessionResult<BreakpointInfo>>, String> {
         self.sessions
-            .set_breakpoint(&session_id, &expression, one_shot)
+            .set_breakpoint(
+                &session_id,
+                &expression,
+                one_shot,
+                kind.unwrap_or(BreakpointKind::Code),
+                data_size,
+                access,
+                condition.as_deref(),
+                pass_count,
+                match_thread,
+                enabled.unwrap_or(true),
+            )
             .await
             .map(|data| Json(SessionResult { session_id, data }))
             .map_err(|error| error.to_string())
@@ -889,6 +928,25 @@ impl WindbgServer {
                     removed: true,
                 })
             })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.set_breakpoint_enabled",
+        description = "Enable or disable an existing breakpoint. This mutates debugger state and should require user approval."
+    )]
+    async fn set_breakpoint_enabled(
+        &self,
+        Parameters(BreakpointStateParams {
+            session_id,
+            breakpoint_id,
+            enabled,
+        }): Parameters<BreakpointStateParams>,
+    ) -> Result<Json<SessionResult<BreakpointInfo>>, String> {
+        self.sessions
+            .set_breakpoint_enabled(&session_id, breakpoint_id, enabled)
+            .await
+            .map(|data| Json(SessionResult { session_id, data }))
             .map_err(|error| error.to_string())
     }
 
