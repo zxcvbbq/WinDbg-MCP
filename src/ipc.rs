@@ -10,6 +10,16 @@ pub enum WorkerRequest {
     ConnectFrontend {
         connection: String,
     },
+    AttachRemoteProcess {
+        connection: String,
+        pid: u32,
+        noninvasive: bool,
+    },
+    LaunchRemoteProcess {
+        connection: String,
+        command_line: String,
+        terminate_on_close: bool,
+    },
     AttachProcess {
         pid: u32,
         noninvasive: bool,

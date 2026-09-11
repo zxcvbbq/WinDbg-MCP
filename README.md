@@ -43,8 +43,9 @@ codex plugin add windbg-mcp@zxcvbbq
 Session lifecycle:
 
 - `windbg.health`, `windbg.engine_probe`
-- `windbg.open_dump`, `windbg.connect_frontend`
+- `windbg.open_dump`, `windbg.connect_frontend`, `windbg.connect_remote`
 - `windbg.attach_process`, `windbg.launch_process`
+- `windbg.attach_remote_process`, `windbg.launch_remote_process`
 - `windbg.session_status`, `windbg.list_sessions`, `windbg.close_session`
 
 Inspection and control:
@@ -91,3 +92,35 @@ Then call `windbg.connect_frontend` with:
 The returned session handle is used by every inspection and execution tool.
 Closing the MCP session disconnects the MCP client without ending the WinDbg
 session.
+
+## Remote live debugging
+
+`windbg.connect_remote` controls an existing WinDbg or CDB session on another
+Windows host. In that debugger's command window, start a TCP debugging server:
+
+```text
+.server tcp:port=5005
+```
+
+Then connect from the MCP client:
+
+```json
+{
+  "host": "192.168.1.20",
+  "port": 5005
+}
+```
+
+The remote GUI is not required for the MCP itself; it is only needed when you
+want to share a session that is already open in WinDbg. For direct process
+debugging without a GUI, start Microsoft's `dbgsrv.exe` on the target host,
+then use `windbg.attach_remote_process` with its TCP port and the remote PID,
+or `windbg.launch_remote_process` to start a process there. All subsequent
+inspection and command tools work with the returned session ID.
+
+```text
+dbgsrv.exe -t tcp:port=5005
+```
+
+TCP debugging is unencrypted. Restrict the port with a firewall and use a
+server password or a secured WinDbg transport when the network is not trusted.

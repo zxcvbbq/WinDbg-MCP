@@ -48,8 +48,19 @@ pub struct OpenDumpParams {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ConnectFrontendParams {
-    /// Local WinDbg debugging-server connection, for example npipe:server=localhost,pipe=my_debug.
+    /// WinDbg debugging-server connection string. Use npipe:server=localhost,pipe=<name> for a
+    /// local GUI session or tcp:server=<host>,port=<port> for a remote session.
     pub connection: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ConnectRemoteParams {
+    /// Remote Windows host name or IP address running a WinDbg debugging server.
+    pub host: String,
+    /// TCP port exposed by the remote WinDbg debugging server.
+    pub port: u16,
+    /// Optional TCP server password.
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -62,8 +73,37 @@ pub struct AttachProcessParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AttachRemoteProcessParams {
+    /// Remote Windows host name or IP address running dbgsrv.exe.
+    pub host: String,
+    /// TCP port exposed by dbgsrv.exe.
+    pub port: u16,
+    /// Optional TCP process-server password.
+    pub password: Option<String>,
+    /// Windows system process identifier on the remote host.
+    pub pid: u32,
+    /// Use a noninvasive attach. This limits mutation and execution-control capabilities.
+    #[serde(default)]
+    pub noninvasive: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct LaunchProcessParams {
     /// Windows command line. It is passed directly to DbgEng, not through a shell.
+    pub command_line: String,
+    /// Terminate the launched target when the MCP session closes; otherwise detach and leave it running.
+    pub terminate_on_close: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LaunchRemoteProcessParams {
+    /// Remote Windows host name or IP address running dbgsrv.exe.
+    pub host: String,
+    /// TCP port exposed by dbgsrv.exe.
+    pub port: u16,
+    /// Optional TCP process-server password.
+    pub password: Option<String>,
+    /// Windows command line executed on the remote host. It is passed directly to DbgEng.
     pub command_line: String,
     /// Terminate the launched target when the MCP session closes; otherwise detach and leave it running.
     pub terminate_on_close: bool,
@@ -310,7 +350,7 @@ impl WindbgServer {
 
     #[tool(
         name = "windbg.connect_frontend",
-        description = "Join an existing WinDbg session through a local named-pipe debugging server and return an explicit session handle. In WinDbg, create it with .server npipe:pipe=<name>. Closing the MCP session disconnects only this client."
+        description = "Join an existing WinDbg session through a local named-pipe or remote TCP debugging server and return an explicit session handle. Use .server npipe:pipe=<name> or .server tcp:port=<port>. Closing the MCP session disconnects only this client."
     )]
     async fn connect_frontend(
         &self,
@@ -318,6 +358,31 @@ impl WindbgServer {
     ) -> Result<Json<OpenDumpResult>, String> {
         self.sessions
             .connect_frontend(&connection)
+            .await
+            .map(|(session_id, target)| {
+                Json(OpenDumpResult {
+                    session_id,
+                    target,
+                    retention: "until windbg.close_session or MCP server exit".to_string(),
+                })
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.connect_remote",
+        description = "Connect to an existing WinDbg or CDB debugging server over TCP and return an explicit session handle. On the remote GUI, start a server with .server tcp:port=<port>."
+    )]
+    async fn connect_remote(
+        &self,
+        Parameters(ConnectRemoteParams {
+            host,
+            port,
+            password,
+        }): Parameters<ConnectRemoteParams>,
+    ) -> Result<Json<OpenDumpResult>, String> {
+        self.sessions
+            .connect_remote(&host, port, password.as_deref())
             .await
             .map(|(session_id, target)| {
                 Json(OpenDumpResult {
@@ -351,6 +416,33 @@ impl WindbgServer {
     }
 
     #[tool(
+        name = "windbg.attach_remote_process",
+        description = "Connect to dbgsrv.exe on a remote Windows host over TCP, attach to a process by PID, and return an explicit session handle."
+    )]
+    async fn attach_remote_process(
+        &self,
+        Parameters(AttachRemoteProcessParams {
+            host,
+            port,
+            password,
+            pid,
+            noninvasive,
+        }): Parameters<AttachRemoteProcessParams>,
+    ) -> Result<Json<OpenDumpResult>, String> {
+        self.sessions
+            .attach_remote_process(&host, port, password.as_deref(), pid, noninvasive)
+            .await
+            .map(|(session_id, target)| {
+                Json(OpenDumpResult {
+                    session_id,
+                    target,
+                    retention: "until windbg.close_session or MCP server exit".to_string(),
+                })
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
         name = "windbg.launch_process",
         description = "Launch a local Windows process under an isolated DbgEng session and stop at its initial event. The command line is passed directly to DbgEng, not to a shell."
     )]
@@ -363,6 +455,44 @@ impl WindbgServer {
     ) -> Result<Json<OpenDumpResult>, String> {
         self.sessions
             .launch_process(&command_line, terminate_on_close)
+            .await
+            .map(|(session_id, target)| {
+                Json(OpenDumpResult {
+                    session_id,
+                    target,
+                    retention: if terminate_on_close {
+                        "target terminates on windbg.close_session or MCP server exit"
+                    } else {
+                        "target is detached on windbg.close_session or MCP server exit"
+                    }
+                    .to_string(),
+                })
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.launch_remote_process",
+        description = "Connect to dbgsrv.exe on a remote Windows host over TCP, launch a process there under DbgEng, and return an explicit session handle."
+    )]
+    async fn launch_remote_process(
+        &self,
+        Parameters(LaunchRemoteProcessParams {
+            host,
+            port,
+            password,
+            command_line,
+            terminate_on_close,
+        }): Parameters<LaunchRemoteProcessParams>,
+    ) -> Result<Json<OpenDumpResult>, String> {
+        self.sessions
+            .launch_remote_process(
+                &host,
+                port,
+                password.as_deref(),
+                &command_line,
+                terminate_on_close,
+            )
             .await
             .map(|(session_id, target)| {
                 Json(OpenDumpResult {
@@ -791,8 +921,8 @@ impl WindbgServer {
 
 #[tool_handler(
     name = "windbg-mcp",
-    version = "0.1.0",
-    instructions = "Structured, local access to Microsoft's Windows Debugger Engine. Debugger state is represented by explicit session handles; there is no implicit current session."
+    version = "0.1.3",
+    instructions = "Structured local and remote access to Microsoft's Windows Debugger Engine. Debugger state is represented by explicit session handles; there is no implicit current session."
 )]
 impl ServerHandler for WindbgServer {}
 

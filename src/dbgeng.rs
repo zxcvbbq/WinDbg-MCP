@@ -63,6 +63,8 @@ pub enum EngineError {
     InitialEvent(String),
     #[error("failed to connect to WinDbg frontend '{connection}': {message}")]
     ConnectFrontend { connection: String, message: String },
+    #[error("failed to connect to DbgEng process server '{connection}': {message}")]
+    ConnectProcessServer { connection: String, message: String },
     #[error("DbgEng query failed: {0}")]
     Query(String),
 }
@@ -353,6 +355,7 @@ pub struct EngineSession {
 enum CloseMode {
     OwnedTarget { terminate: bool },
     RemoteClient,
+    ProcessServer { server: u64, terminate: bool },
 }
 
 impl EngineSession {
@@ -406,9 +409,87 @@ impl EngineSession {
         })?;
         Self::from_client(
             client,
-            format!("windbg://{connection}"),
+            format!("windbg://{}", redact_connection(connection)),
             CloseMode::RemoteClient,
         )
+    }
+
+    pub fn attach_remote_process(
+        connection: &str,
+        pid: u32,
+        noninvasive: bool,
+    ) -> Result<Self, EngineError> {
+        let client = create_client()?;
+        let server = connect_process_server(&client, connection)?;
+        let session = Self::from_client(
+            client,
+            format!(
+                "process-server://{}/pid/{pid}",
+                redact_connection(connection)
+            ),
+            CloseMode::ProcessServer {
+                server,
+                terminate: false,
+            },
+        )?;
+        let flags = if noninvasive {
+            DEBUG_ATTACH_NONINVASIVE
+        } else {
+            DEBUG_ATTACH_DEFAULT
+        };
+        unsafe { session.client.AttachProcess(server, pid, flags) }.map_err(|error| {
+            EngineError::Initialization(format!(
+                "failed to attach to remote process {pid}: {error}"
+            ))
+        })?;
+        unsafe { session.control.WaitForEvent(0, u32::MAX) }.map_err(|error| {
+            EngineError::InitialEvent(format_engine_error(
+                error.to_string(),
+                session.take_output(),
+            ))
+        })?;
+        Ok(session)
+    }
+
+    pub fn launch_remote_process(
+        connection: &str,
+        command_line: &str,
+        terminate_on_close: bool,
+    ) -> Result<Self, EngineError> {
+        let client = create_client()?;
+        let server = connect_process_server(&client, connection)?;
+        let session = Self::from_client(
+            client,
+            format!(
+                "process-server://{}/{}",
+                redact_connection(connection),
+                command_line
+            ),
+            CloseMode::ProcessServer {
+                server,
+                terminate: terminate_on_close,
+            },
+        )?;
+        let mut wide_command: Vec<u16> = command_line.encode_utf16().collect();
+        wide_command.push(0);
+        const DEBUG_CREATE_FLAGS: u32 = 0x0000_0002;
+        unsafe {
+            session.client.CreateProcessWide(
+                server,
+                PCWSTR(wide_command.as_ptr()),
+                DEBUG_CREATE_FLAGS,
+            )
+        }
+        .map_err(|error| {
+            EngineError::Initialization(format!("failed to launch remote process: {error}"))
+        })?;
+        unsafe { session.control.WaitForEvent(0, u32::MAX) }.map_err(|error| {
+            EngineError::InitialEvent(format_engine_error(
+                error.to_string(),
+                session.take_output(),
+            ))
+        })?;
+        Ok(session)
     }
 
     pub fn attach_process(pid: u32, noninvasive: bool) -> Result<Self, EngineError> {
@@ -1229,9 +1310,45 @@ impl Drop for EngineSession {
             CloseMode::OwnedTarget { terminate: false } => DEBUG_END_ACTIVE_DETACH,
             CloseMode::OwnedTarget { terminate: true } => DEBUG_END_ACTIVE_TERMINATE,
             CloseMode::RemoteClient => DEBUG_END_DISCONNECT,
+            CloseMode::ProcessServer {
+                terminate: false, ..
+            } => DEBUG_END_ACTIVE_DETACH,
+            CloseMode::ProcessServer {
+                terminate: true, ..
+            } => DEBUG_END_ACTIVE_TERMINATE,
         };
         let _ = unsafe { self.client.EndSession(flag) };
+        if let CloseMode::ProcessServer { server, .. } = self.close_mode {
+            let _ = unsafe { self.client.DisconnectProcessServer(server) };
+        }
     }
+}
+
+fn connect_process_server(client: &IDebugClient5, connection: &str) -> Result<u64, EngineError> {
+    let mut wide_connection: Vec<u16> = connection.encode_utf16().collect();
+    wide_connection.push(0);
+    unsafe { client.ConnectProcessServerWide(PCWSTR(wide_connection.as_ptr())) }.map_err(|error| {
+        EngineError::ConnectProcessServer {
+            connection: redact_connection(connection),
+            message: error.to_string(),
+        }
+    })
+}
+
+fn redact_connection(connection: &str) -> String {
+    connection
+        .split(',')
+        .map(|option| {
+            option
+                .split_once('=')
+                .filter(|(key, _)| key.trim().eq_ignore_ascii_case("password"))
+                .map_or_else(
+                    || option.to_string(),
+                    |(key, _)| format!("{key}=<redacted>"),
+                )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn debuggee_class_name(value: u32) -> &'static str {

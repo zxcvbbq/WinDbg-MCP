@@ -48,6 +48,8 @@ pub fn run() -> anyhow::Result<()> {
         let response = match request {
             WorkerRequest::OpenDump { .. }
             | WorkerRequest::ConnectFrontend { .. }
+            | WorkerRequest::AttachRemoteProcess { .. }
+            | WorkerRequest::LaunchRemoteProcess { .. }
             | WorkerRequest::AttachProcess { .. }
             | WorkerRequest::LaunchProcess { .. }
                 if engine.is_some() =>
@@ -96,6 +98,15 @@ pub fn run() -> anyhow::Result<()> {
                 EngineSession::attach_process(pid, noninvasive),
                 "attach_process_failed",
             ),
+            WorkerRequest::AttachRemoteProcess {
+                connection,
+                pid,
+                noninvasive,
+            } => open_engine(
+                &mut engine,
+                EngineSession::attach_remote_process(&connection, pid, noninvasive),
+                "attach_remote_process_failed",
+            ),
             WorkerRequest::LaunchProcess {
                 command_line,
                 terminate_on_close,
@@ -103,6 +114,19 @@ pub fn run() -> anyhow::Result<()> {
                 &mut engine,
                 EngineSession::launch_process(&command_line, terminate_on_close),
                 "launch_process_failed",
+            ),
+            WorkerRequest::LaunchRemoteProcess {
+                connection,
+                command_line,
+                terminate_on_close,
+            } => open_engine(
+                &mut engine,
+                EngineSession::launch_remote_process(
+                    &connection,
+                    &command_line,
+                    terminate_on_close,
+                ),
+                "launch_remote_process_failed",
             ),
             WorkerRequest::Status => match engine.as_ref() {
                 Some(session) => match session.summary() {

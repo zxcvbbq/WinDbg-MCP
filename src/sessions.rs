@@ -67,17 +67,59 @@ impl SessionManager {
             .await
     }
 
+    pub async fn connect_remote(
+        &self,
+        host: &str,
+        port: u16,
+        password: Option<&str>,
+    ) -> anyhow::Result<(String, TargetSummary)> {
+        let connection = build_tcp_connection(host, port, password)?;
+        self.start_session(WorkerRequest::ConnectFrontend { connection })
+            .await
+    }
+
+    pub async fn attach_remote_process(
+        &self,
+        host: &str,
+        port: u16,
+        password: Option<&str>,
+        pid: u32,
+        noninvasive: bool,
+    ) -> anyhow::Result<(String, TargetSummary)> {
+        validate_pid(pid)?;
+        let connection = build_tcp_connection(host, port, password)?;
+        self.start_session(WorkerRequest::AttachRemoteProcess {
+            connection,
+            pid,
+            noninvasive,
+        })
+        .await
+    }
+
+    pub async fn launch_remote_process(
+        &self,
+        host: &str,
+        port: u16,
+        password: Option<&str>,
+        command_line: &str,
+        terminate_on_close: bool,
+    ) -> anyhow::Result<(String, TargetSummary)> {
+        validate_text("command_line", command_line, 32766)?;
+        let connection = build_tcp_connection(host, port, password)?;
+        self.start_session(WorkerRequest::LaunchRemoteProcess {
+            connection,
+            command_line: command_line.to_string(),
+            terminate_on_close,
+        })
+        .await
+    }
+
     pub async fn attach_process(
         &self,
         pid: u32,
         noninvasive: bool,
     ) -> anyhow::Result<(String, TargetSummary)> {
-        if pid == 0 {
-            bail!("invalid_argument: pid must be greater than zero");
-        }
-        if pid == std::process::id() {
-            bail!("invalid_argument: the MCP server cannot debug itself");
-        }
+        validate_pid(pid)?;
         self.start_session(WorkerRequest::AttachProcess { pid, noninvasive })
             .await
     }
@@ -611,9 +653,12 @@ fn validate_frontend_connection(supplied: &str) -> anyhow::Result<String> {
     let supplied = supplied.trim();
     let (transport, options) = supplied
         .split_once(':')
-        .ok_or_else(|| anyhow!("invalid_argument: expected an npipe connection string"))?;
+        .ok_or_else(|| anyhow!("invalid_argument: expected an npipe or tcp connection string"))?;
+    if transport.eq_ignore_ascii_case("tcp") {
+        return validate_tcp_connection_options(options);
+    }
     if !transport.eq_ignore_ascii_case("npipe") {
-        bail!("invalid_argument: only local npipe WinDbg connections are supported");
+        bail!("invalid_argument: supported frontend transports are npipe and tcp");
     }
 
     let mut server = None;
@@ -635,7 +680,7 @@ fn validate_frontend_connection(supplied: &str) -> anyhow::Result<String> {
         || server.eq_ignore_ascii_case("localhost")
         || (!local_name.is_empty() && server.eq_ignore_ascii_case(&local_name)))
     {
-        bail!("invalid_argument: frontend connections must target this computer");
+        bail!("invalid_argument: npipe connections must target this computer");
     }
     let pipe = pipe.ok_or_else(|| anyhow!("invalid_argument: npipe pipe is required"))?;
     if pipe.is_empty()
@@ -650,6 +695,83 @@ fn validate_frontend_connection(supplied: &str) -> anyhow::Result<String> {
     }
 
     Ok(format!("npipe:server={server},pipe={pipe}"))
+}
+
+fn build_tcp_connection(host: &str, port: u16, password: Option<&str>) -> anyhow::Result<String> {
+    validate_tcp_host(host)?;
+    if port == 0 {
+        bail!("invalid_argument: port must be between 1 and 65535");
+    }
+    validate_tcp_password(password)?;
+    Ok(format!(
+        "tcp:server={},port={}{}",
+        host.trim(),
+        port,
+        password.map_or_else(String::new, |value| format!(",password={value}"))
+    ))
+}
+
+fn validate_tcp_connection_options(options: &str) -> anyhow::Result<String> {
+    let mut host = None;
+    let mut port = None;
+    let mut password = None;
+    for option in options.split(',') {
+        let (key, value) = option
+            .split_once('=')
+            .ok_or_else(|| anyhow!("invalid_argument: malformed tcp option '{option}'"))?;
+        match key.trim().to_ascii_lowercase().as_str() {
+            "server" if host.is_none() => host = Some(value.trim()),
+            "port" if port.is_none() => port = Some(value.trim()),
+            "password" if password.is_none() => password = Some(value.trim()),
+            _ => bail!("invalid_argument: unsupported or duplicate tcp option '{key}'"),
+        }
+    }
+    let host = host.ok_or_else(|| anyhow!("invalid_argument: tcp server is required"))?;
+    let port_text = port.ok_or_else(|| anyhow!("invalid_argument: tcp port is required"))?;
+    let port = port_text
+        .parse::<u16>()
+        .map_err(|_| anyhow!("invalid_argument: tcp port must be between 1 and 65535"))?;
+    build_tcp_connection(host, port, password)
+}
+
+fn validate_tcp_host(host: &str) -> anyhow::Result<()> {
+    let host = host.trim();
+    if host.is_empty() || host.len() > 255 {
+        bail!("invalid_argument: host must be 1-255 characters");
+    }
+    if host.chars().any(|character| {
+        character.is_ascii_whitespace()
+            || character.is_ascii_control()
+            || matches!(character, ',' | '=' | '\0')
+    }) {
+        bail!("invalid_argument: host contains an unsupported character");
+    }
+    Ok(())
+}
+
+fn validate_tcp_password(password: Option<&str>) -> anyhow::Result<()> {
+    let Some(password) = password else {
+        return Ok(());
+    };
+    if password.is_empty()
+        || password.len() > 12
+        || !password
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        bail!("invalid_argument: password must be 1-12 ASCII letters or digits");
+    }
+    Ok(())
+}
+
+fn validate_pid(pid: u32) -> anyhow::Result<()> {
+    if pid == 0 {
+        bail!("invalid_argument: pid must be greater than zero");
+    }
+    if pid == std::process::id() {
+        bail!("invalid_argument: the MCP server cannot debug itself");
+    }
+    Ok(())
 }
 
 fn validate_page(label: &str, count: u32) -> anyhow::Result<()> {
@@ -696,9 +818,27 @@ mod tests {
     }
 
     #[test]
-    fn frontend_connection_rejects_network_transport() {
-        let error = validate_frontend_connection("tcp:server=localhost,port=5005").unwrap_err();
-        assert!(error.to_string().contains("only local npipe"));
+    fn frontend_connection_accepts_tcp_transport() {
+        let value = validate_frontend_connection("tcp:server=10.0.0.5,port=5005").unwrap();
+        assert_eq!(value, "tcp:server=10.0.0.5,port=5005");
+    }
+
+    #[test]
+    fn tcp_connection_rejects_injection_characters() {
+        let error = build_tcp_connection("10.0.0.5,evil", 5005, None).unwrap_err();
+        assert!(error.to_string().contains("unsupported character"));
+    }
+
+    #[test]
+    fn tcp_connection_accepts_password() {
+        let value = build_tcp_connection("debug-host", 5005, Some("secret123")).unwrap();
+        assert_eq!(value, "tcp:server=debug-host,port=5005,password=secret123");
+    }
+
+    #[test]
+    fn tcp_connection_rejects_invalid_password() {
+        let error = build_tcp_connection("debug-host", 5005, Some("not valid!")).unwrap_err();
+        assert!(error.to_string().contains("password must be"));
     }
 
     #[test]
