@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     dbgeng,
     ipc::{
-        BreakpointInfo, BreakpointList, CommandResult, ContextSelection, Disassembly,
-        ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite, ModuleList,
-        ProcessList, RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
+        BreakpointInfo, BreakpointList, CommandResult, ContextSelection, DebugServerList,
+        Disassembly, ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite,
+        ModuleList, ProcessList, RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
         TargetSummary, ThreadList,
     },
     sessions::SessionManager,
@@ -51,6 +51,18 @@ pub struct ConnectFrontendParams {
     /// WinDbg debugging-server connection string. Use npipe:server=localhost,pipe=<name> for a
     /// local GUI session or tcp:server=<host>,port=<port> for a remote session.
     pub connection: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DiscoverServersParams {
+    /// Computer name or IP address. Defaults to this computer.
+    pub host: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AutoConnectParams {
+    /// Computer name or IP address. Defaults to this computer.
+    pub host: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -358,6 +370,42 @@ impl WindbgServer {
     ) -> Result<Json<OpenDumpResult>, String> {
         self.sessions
             .connect_frontend(&connection)
+            .await
+            .map(|(session_id, target)| {
+                Json(OpenDumpResult {
+                    session_id,
+                    target,
+                    retention: "until windbg.close_session or MCP server exit".to_string(),
+                })
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.discover_servers",
+        description = "List WinDbg debugging servers visible on a computer. Returned connection strings can be passed to windbg.connect_frontend."
+    )]
+    async fn discover_servers(
+        &self,
+        Parameters(DiscoverServersParams { host }): Parameters<DiscoverServersParams>,
+    ) -> Result<Json<DebugServerList>, String> {
+        self.sessions
+            .discover_servers(host.as_deref())
+            .await
+            .map(Json)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.auto_connect",
+        description = "Discover WinDbg debugging servers and connect automatically when exactly one server is visible. Use windbg.discover_servers when multiple servers are present."
+    )]
+    async fn auto_connect(
+        &self,
+        Parameters(AutoConnectParams { host }): Parameters<AutoConnectParams>,
+    ) -> Result<Json<OpenDumpResult>, String> {
+        self.sessions
+            .auto_connect(host.as_deref())
             .await
             .map(|(session_id, target)| {
                 Json(OpenDumpResult {

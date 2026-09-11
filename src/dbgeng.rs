@@ -22,8 +22,8 @@ use windows::{
             DEBUG_EVENT_SERVICE_EXCEPTION, DEBUG_EVENT_SESSION_STATUS, DEBUG_EVENT_SYSTEM_ERROR,
             DEBUG_EVENT_UNLOAD_MODULE, DEBUG_EXECUTE_DEFAULT, DEBUG_INTERRUPT_ACTIVE,
             DEBUG_MODNAME_IMAGE, DEBUG_MODNAME_MODULE, DEBUG_MODNAME_SYMBOL_FILE,
-            DEBUG_MODULE_PARAMETERS, DEBUG_OUTCTL_THIS_CLIENT, DEBUG_STACK_FRAME,
-            DEBUG_STATUS_BREAK, DEBUG_STATUS_GO, DEBUG_STATUS_GO_HANDLED,
+            DEBUG_MODULE_PARAMETERS, DEBUG_OUTCTL_THIS_CLIENT, DEBUG_SERVERS_DEBUGGER,
+            DEBUG_STACK_FRAME, DEBUG_STATUS_BREAK, DEBUG_STATUS_GO, DEBUG_STATUS_GO_HANDLED,
             DEBUG_STATUS_GO_NOT_HANDLED, DEBUG_STATUS_IGNORE_EVENT, DEBUG_STATUS_NO_DEBUGGEE,
             DEBUG_STATUS_RESTART_REQUESTED, DEBUG_STATUS_STEP_BRANCH, DEBUG_STATUS_STEP_INTO,
             DEBUG_STATUS_STEP_OVER, DEBUG_STATUS_TIMEOUT, DEBUG_STATUS_WAIT_INPUT,
@@ -46,11 +46,11 @@ use windows::{
 };
 
 use crate::ipc::{
-    BreakpointInfo, BreakpointList, CommandResult, ContextSelection, Disassembly,
-    DisassemblyInstruction, ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead,
-    MemoryWrite, ModuleInfo, ModuleList, ProcessInfo, ProcessList, RegisterList, RegisterValue,
-    SourceLocation, StackFrame, StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary,
-    ThreadInfo, ThreadList,
+    BreakpointInfo, BreakpointList, CommandResult, ContextSelection, DebugServerInfo,
+    DebugServerList, Disassembly, DisassemblyInstruction, ExecutionAction, ExecutionResult,
+    ExpressionValue, MemoryRead, MemoryWrite, ModuleInfo, ModuleList, ProcessInfo, ProcessList,
+    RegisterList, RegisterValue, SourceLocation, StackFrame, StackTrace, SymbolLookup, SymbolPath,
+    SymbolReload, TargetSummary, ThreadInfo, ThreadList,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -335,6 +335,66 @@ pub fn probe() -> Result<(), EngineError> {
     let client = create_client()?;
     drop(client);
     Ok(())
+}
+
+pub fn discover_servers(machine: &str) -> Result<DebugServerList, EngineError> {
+    let client = create_client()?;
+    let output = Arc::new(Mutex::new(String::new()));
+    let callbacks: IDebugOutputCallbacksWide = OutputCallbacks {
+        buffer: Arc::clone(&output),
+    }
+    .into();
+    unsafe { client.SetOutputCallbacksWide(&callbacks) }
+        .map_err(|error| EngineError::Initialization(error.to_string()))?;
+
+    let mut wide_machine: Vec<u16> = machine.encode_utf16().collect();
+    wide_machine.push(0);
+    unsafe {
+        client.OutputServersWide(
+            DEBUG_OUTCTL_THIS_CLIENT,
+            PCWSTR(wide_machine.as_ptr()),
+            DEBUG_SERVERS_DEBUGGER,
+        )
+    }
+    .map_err(|error| EngineError::Query(error.to_string()))?;
+
+    let raw_output = output
+        .lock()
+        .map(|mut value| std::mem::take(&mut *value))
+        .unwrap_or_default();
+    let servers = parse_server_output(&raw_output);
+    Ok(DebugServerList {
+        machine: machine.to_string(),
+        servers,
+        raw_output,
+    })
+}
+
+fn parse_server_output(output: &str) -> Vec<DebugServerInfo> {
+    let mut servers = Vec::new();
+    for token in output.split_whitespace() {
+        let token = token.trim_matches(|character: char| "\"'`<>(),".contains(character));
+        let Some((transport, _)) = token.split_once(':') else {
+            continue;
+        };
+        if !matches!(
+            transport.to_ascii_lowercase().as_str(),
+            "npipe" | "tcp" | "spipe" | "ssl" | "com"
+        ) {
+            continue;
+        }
+        if servers
+            .iter()
+            .any(|server: &DebugServerInfo| server.connection.eq_ignore_ascii_case(token))
+        {
+            continue;
+        }
+        servers.push(DebugServerInfo {
+            connection: token.to_string(),
+            server_type: "debugger".to_string(),
+        });
+    }
+    servers
 }
 
 pub struct EngineSession {

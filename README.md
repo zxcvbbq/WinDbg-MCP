@@ -44,6 +44,7 @@ Session lifecycle:
 
 - `windbg.health`, `windbg.engine_probe`
 - `windbg.open_dump`, `windbg.connect_frontend`, `windbg.connect_remote`
+- `windbg.discover_servers`, `windbg.auto_connect`
 - `windbg.attach_process`, `windbg.launch_process`
 - `windbg.attach_remote_process`, `windbg.launch_remote_process`
 - `windbg.session_status`, `windbg.list_sessions`, `windbg.close_session`
@@ -110,6 +111,9 @@ Then connect from the MCP client:
   "port": 5005
 }
 ```
+
+For one visible local WinDbg server, `windbg.auto_connect` discovers and joins
+it. Use `windbg.discover_servers` when more than one server is running.
 
 The remote GUI is not required for the MCP itself; it is only needed when you
 want to share a session that is already open in WinDbg. For direct process

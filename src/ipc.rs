@@ -107,6 +107,19 @@ pub struct TargetSummary {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct DebugServerInfo {
+    pub connection: String,
+    pub server_type: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct DebugServerList {
+    pub machine: String,
+    pub servers: Vec<DebugServerInfo>,
+    pub raw_output: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct MemoryRead {
     pub address: String,
     pub bytes_read: usize,

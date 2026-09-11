@@ -9,11 +9,14 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::ipc::{
-    BreakpointInfo, BreakpointList, CommandResult, ContextSelection, Disassembly, ExecutionAction,
-    ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite, ModuleList, ProcessList,
-    RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary, ThreadList,
-    WorkerRequest, WorkerResponse,
+use crate::{
+    dbgeng,
+    ipc::{
+        BreakpointInfo, BreakpointList, CommandResult, ContextSelection, DebugServerList,
+        Disassembly, ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite,
+        ModuleList, ProcessList, RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
+        TargetSummary, ThreadList, WorkerRequest, WorkerResponse,
+    },
 };
 
 const WORKER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -65,6 +68,43 @@ impl SessionManager {
         let connection = validate_frontend_connection(supplied_connection)?;
         self.start_session(WorkerRequest::ConnectFrontend { connection })
             .await
+    }
+
+    pub async fn discover_servers(
+        &self,
+        supplied_host: Option<&str>,
+    ) -> anyhow::Result<DebugServerList> {
+        let machine = validate_discovery_host(supplied_host)?;
+        tokio::task::spawn_blocking(move || dbgeng::discover_servers(&machine))
+            .await
+            .context("debug-server discovery task failed")?
+            .map_err(|error| anyhow!(error.to_string()))
+    }
+
+    pub async fn auto_connect(
+        &self,
+        supplied_host: Option<&str>,
+    ) -> anyhow::Result<(String, TargetSummary)> {
+        let discovered = self.discover_servers(supplied_host).await?;
+        let [server] = discovered.servers.as_slice() else {
+            if discovered.servers.is_empty() {
+                bail!(
+                    "no_debugger_servers: no WinDbg debugging servers were found on {}",
+                    discovered.machine
+                );
+            }
+            let candidates = discovered
+                .servers
+                .iter()
+                .map(|server| server.connection.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!(
+                "multiple_debugger_servers: found {} servers ({candidates}); use windbg.connect_frontend with one connection",
+                discovered.servers.len()
+            );
+        };
+        self.connect_frontend(&server.connection).await
     }
 
     pub async fn connect_remote(
@@ -709,6 +749,18 @@ fn build_tcp_connection(host: &str, port: u16, password: Option<&str>) -> anyhow
         port,
         password.map_or_else(String::new, |value| format!(",password={value}"))
     ))
+}
+
+fn validate_discovery_host(supplied: Option<&str>) -> anyhow::Result<String> {
+    let host = supplied.unwrap_or("localhost").trim();
+    validate_tcp_host(host)?;
+    if host
+        .chars()
+        .any(|character| matches!(character, '\\' | '/'))
+    {
+        bail!("invalid_argument: discovery host must be a computer name or IP address");
+    }
+    Ok(format!("\\\\{host}"))
 }
 
 fn validate_tcp_connection_options(options: &str) -> anyhow::Result<String> {
