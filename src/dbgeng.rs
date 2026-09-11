@@ -43,6 +43,7 @@ use windows::{
         GetProcAddress, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
         LoadLibraryExW,
     },
+    Win32::System::Memory::MEMORY_BASIC_INFORMATION64,
     core::{GUID, HRESULT, Interface, PCSTR, PCWSTR},
 };
 
@@ -50,9 +51,9 @@ use crate::ipc::{
     BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
     ContextSelection, DebugEvent, DebugServerInfo, DebugServerList, Disassembly,
     DisassemblyInstruction, ExecutionAction, ExecutionResult, ExpressionValue, MemoryRead,
-    MemoryWrite, ModuleInfo, ModuleList, ProcessInfo, ProcessList, RegisterList, RegisterValue,
-    SourceLocation, StackFrame, StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary,
-    ThreadInfo, ThreadList,
+    MemoryRegion, MemoryWrite, ModuleInfo, ModuleList, ProcessInfo, ProcessList, RegisterList,
+    RegisterValue, SourceLocation, StackFrame, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
+    TargetSummary, ThreadInfo, ThreadList,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -1043,6 +1044,21 @@ impl EngineSession {
             bytes_read: bytes.len(),
             hex,
             ascii,
+        })
+    }
+
+    pub fn query_memory(&self, address: u64) -> Result<MemoryRegion, EngineError> {
+        let mut info = MEMORY_BASIC_INFORMATION64::default();
+        unsafe { self.data_spaces.QueryVirtual(address, &mut info) }
+            .map_err(|error| EngineError::Query(error.to_string()))?;
+        Ok(MemoryRegion {
+            base: hex_address(info.BaseAddress),
+            allocation_base: hex_address(info.AllocationBase),
+            size: hex_address(info.RegionSize),
+            allocation_protect: format!("0x{:08x}", info.AllocationProtect.0),
+            state: format!("0x{:08x}", info.State.0),
+            protect: format!("0x{:08x}", info.Protect.0),
+            kind: format!("0x{:08x}", info.Type.0),
         })
     }
 

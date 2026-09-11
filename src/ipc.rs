@@ -66,6 +66,9 @@ pub enum WorkerRequest {
         address: u64,
         length: u32,
     },
+    QueryMemory {
+        address: u64,
+    },
     WriteMemory {
         address: u64,
         bytes: Vec<u8>,
@@ -164,6 +167,17 @@ pub struct MemoryRead {
 pub struct MemoryWrite {
     pub address: String,
     pub bytes_written: usize,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct MemoryRegion {
+    pub base: String,
+    pub allocation_base: String,
+    pub size: String,
+    pub allocation_protect: String,
+    pub state: String,
+    pub protect: String,
+    pub kind: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -387,6 +401,7 @@ pub enum WorkerResponse {
     Disassembly(Disassembly),
     Symbol(SymbolLookup),
     Memory(MemoryRead),
+    MemoryRegion(MemoryRegion),
     MemoryWritten(MemoryWrite),
     SymbolPath(SymbolPath),
     SymbolsReloaded(SymbolReload),

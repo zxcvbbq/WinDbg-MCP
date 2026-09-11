@@ -14,9 +14,9 @@ use crate::{
     ipc::{
         BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
         ContextSelection, DebugEvent, DebugServerList, Disassembly, ExecutionAction,
-        ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite, ModuleList, ProcessList,
-        RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary,
-        ThreadList, WorkerRequest, WorkerResponse,
+        ExecutionResult, ExpressionValue, MemoryRead, MemoryRegion, MemoryWrite, ModuleList,
+        ProcessList, RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
+        TargetSummary, ThreadList, WorkerRequest, WorkerResponse,
     },
 };
 
@@ -427,6 +427,17 @@ impl SessionManager {
             WorkerResponse::MemoryWritten(value) => Ok(value),
             WorkerResponse::Error { code, message } => bail!("{code}: {message}"),
             other => bail!("unexpected worker response for memory write: {other:?}"),
+        }
+    }
+
+    pub async fn query_memory(&self, id: &str, address: u64) -> anyhow::Result<MemoryRegion> {
+        match self
+            .request(id, WorkerRequest::QueryMemory { address })
+            .await?
+        {
+            WorkerResponse::MemoryRegion(value) => Ok(value),
+            WorkerResponse::Error { code, message } => bail!("{code}: {message}"),
+            other => bail!("unexpected worker response while querying memory: {other:?}"),
         }
     }
 

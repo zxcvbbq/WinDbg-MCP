@@ -57,6 +57,7 @@ Inspection and control:
 - `windbg.evaluate`, `windbg.disassemble`
 - `windbg.symbol_from_address`, `windbg.address_from_symbol`
 - `windbg.read_memory`, `windbg.write_memory`
+- `windbg.query_memory`
 - `windbg.get_symbol_path`, `windbg.set_symbol_path`, `windbg.reload_symbols`
 - `windbg.list_breakpoints`, `windbg.set_breakpoint`, `windbg.set_breakpoint_enabled`, `windbg.remove_breakpoint`
 - `windbg.execute`, `windbg.wait_for_event`, `windbg.execute_command`

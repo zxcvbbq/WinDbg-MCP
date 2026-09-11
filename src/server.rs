@@ -10,9 +10,9 @@ use crate::{
     ipc::{
         BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
         ContextSelection, DebugEvent, DebugServerList, Disassembly, ExecutionAction,
-        ExecutionResult, ExpressionValue, MemoryRead, MemoryWrite, ModuleList, ProcessList,
-        RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload, TargetSummary,
-        ThreadList,
+        ExecutionResult, ExpressionValue, MemoryRead, MemoryRegion, MemoryWrite, ModuleList,
+        ProcessList, RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
+        TargetSummary, ThreadList,
     },
     sessions::SessionManager,
 };
@@ -827,6 +827,25 @@ impl WindbgServer {
             .read_memory(&session_id, parsed_address, length)
             .await
             .map(|memory| Json(ReadMemoryResult { session_id, memory }))
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.query_memory",
+        description = "Return the virtual-memory region containing an address, including bounds, state, protection, and type"
+    )]
+    async fn query_memory(
+        &self,
+        Parameters(AddressParams {
+            session_id,
+            address,
+        }): Parameters<AddressParams>,
+    ) -> Result<Json<SessionResult<MemoryRegion>>, String> {
+        let address = parse_address(&address)?;
+        self.sessions
+            .query_memory(&session_id, address)
+            .await
+            .map(|data| Json(SessionResult { session_id, data }))
             .map_err(|error| error.to_string())
     }
 

@@ -163,6 +163,12 @@ pub fn run() -> anyhow::Result<()> {
                     message: "the worker has no open debugger session".to_string(),
                 },
             },
+            WorkerRequest::QueryMemory { address } => with_engine(
+                engine.as_ref(),
+                "query_memory_failed",
+                |session| session.query_memory(address),
+                WorkerResponse::MemoryRegion,
+            ),
             WorkerRequest::ListProcesses => with_engine(
                 engine.as_ref(),
                 "list_processes_failed",
