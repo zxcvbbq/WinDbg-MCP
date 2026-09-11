@@ -578,6 +578,40 @@ impl EngineSession {
         Ok(session)
     }
 
+    pub fn attach_kernel(connection: &str, noninvasive: bool) -> Result<Self, EngineError> {
+        let client = create_client()?;
+        let session = Self::from_client(
+            client,
+            format!("kernel://{}", redact_connection(connection)),
+            CloseMode::OwnedTarget { terminate: false },
+        )?;
+        let mut wide_connection: Vec<u16> = connection.encode_utf16().collect();
+        wide_connection.push(0);
+        let flags = if noninvasive {
+            DEBUG_ATTACH_NONINVASIVE
+        } else {
+            DEBUG_ATTACH_DEFAULT
+        };
+        unsafe {
+            session
+                .client
+                .AttachKernelWide(flags, PCWSTR(wide_connection.as_ptr()))
+        }
+        .map_err(|error| {
+            EngineError::Initialization(format!(
+                "failed to attach to kernel using '{}': {error}",
+                redact_connection(connection)
+            ))
+        })?;
+        unsafe { session.control.WaitForEvent(0, u32::MAX) }.map_err(|error| {
+            EngineError::InitialEvent(format_engine_error(
+                error.to_string(),
+                session.take_output(),
+            ))
+        })?;
+        Ok(session)
+    }
+
     pub fn launch_process(
         command_line: &str,
         terminate_on_close: bool,

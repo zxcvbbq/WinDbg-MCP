@@ -165,6 +165,19 @@ impl SessionManager {
             .await
     }
 
+    pub async fn attach_kernel(
+        &self,
+        supplied_connection: &str,
+        noninvasive: bool,
+    ) -> anyhow::Result<(String, TargetSummary)> {
+        let connection = validate_kernel_connection(supplied_connection)?;
+        self.start_session(WorkerRequest::AttachKernel {
+            connection,
+            noninvasive,
+        })
+        .await
+    }
+
     pub async fn launch_process(
         &self,
         command_line: &str,
@@ -828,6 +841,30 @@ fn validate_frontend_connection(supplied: &str) -> anyhow::Result<String> {
     Ok(format!("npipe:server={server},pipe={pipe}"))
 }
 
+fn validate_kernel_connection(supplied: &str) -> anyhow::Result<String> {
+    let connection = supplied.trim();
+    validate_text("connection", connection, 32766)?;
+    let (transport, options) = connection
+        .split_once(':')
+        .ok_or_else(|| anyhow!("invalid_argument: expected a kernel connection string"))?;
+    if !matches!(
+        transport.to_ascii_lowercase().as_str(),
+        "com" | "net" | "usb" | "1394" | "npipe" | "spipe" | "ssl" | "tcp"
+    ) {
+        bail!("invalid_argument: unsupported kernel transport '{transport}'");
+    }
+    if options.trim().is_empty() {
+        bail!("invalid_argument: kernel connection options are required");
+    }
+    if connection
+        .chars()
+        .any(|character| character.is_ascii_whitespace())
+    {
+        bail!("invalid_argument: kernel connection must not contain whitespace");
+    }
+    Ok(connection.to_string())
+}
+
 fn build_tcp_connection(host: &str, port: u16, password: Option<&str>) -> anyhow::Result<String> {
     validate_tcp_host(host)?;
     if port == 0 {
@@ -988,6 +1025,18 @@ mod tests {
     fn frontend_connection_rejects_remote_host() {
         let error = validate_frontend_connection("npipe:server=remote,pipe=debug").unwrap_err();
         assert!(error.to_string().contains("this computer"));
+    }
+
+    #[test]
+    fn kernel_connection_accepts_kdnet() {
+        let value = validate_kernel_connection("net:port=50000,key=1.2.3.4").unwrap();
+        assert_eq!(value, "net:port=50000,key=1.2.3.4");
+    }
+
+    #[test]
+    fn kernel_connection_rejects_unknown_transport() {
+        let error = validate_kernel_connection("udp:port=50000").unwrap_err();
+        assert!(error.to_string().contains("unsupported kernel transport"));
     }
 
     #[test]

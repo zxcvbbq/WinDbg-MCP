@@ -47,6 +47,7 @@ Session lifecycle:
 - `windbg.discover_servers`, `windbg.auto_connect`
 - `windbg.attach_process`, `windbg.launch_process`
 - `windbg.attach_remote_process`, `windbg.launch_remote_process`
+- `windbg.attach_kernel`
 - `windbg.session_status`, `windbg.list_sessions`, `windbg.close_session`
 
 Inspection and control:

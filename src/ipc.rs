@@ -24,6 +24,10 @@ pub enum WorkerRequest {
         pid: u32,
         noninvasive: bool,
     },
+    AttachKernel {
+        connection: String,
+        noninvasive: bool,
+    },
     LaunchProcess {
         command_line: String,
         terminate_on_close: bool,

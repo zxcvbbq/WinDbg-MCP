@@ -51,6 +51,7 @@ pub fn run() -> anyhow::Result<()> {
             | WorkerRequest::AttachRemoteProcess { .. }
             | WorkerRequest::LaunchRemoteProcess { .. }
             | WorkerRequest::AttachProcess { .. }
+            | WorkerRequest::AttachKernel { .. }
             | WorkerRequest::LaunchProcess { .. }
                 if engine.is_some() =>
             {
@@ -97,6 +98,14 @@ pub fn run() -> anyhow::Result<()> {
                 &mut engine,
                 EngineSession::attach_process(pid, noninvasive),
                 "attach_process_failed",
+            ),
+            WorkerRequest::AttachKernel {
+                connection,
+                noninvasive,
+            } => open_engine(
+                &mut engine,
+                EngineSession::attach_kernel(&connection, noninvasive),
+                "attach_kernel_failed",
             ),
             WorkerRequest::AttachRemoteProcess {
                 connection,

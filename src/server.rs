@@ -86,6 +86,15 @@ pub struct AttachProcessParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AttachKernelParams {
+    /// Kernel transport options, such as net:port=50000,key=... or com:port=COM1,baud=115200.
+    pub connection: String,
+    /// Use a noninvasive kernel attach when supported by the transport.
+    #[serde(default)]
+    pub noninvasive: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct AttachRemoteProcessParams {
     /// Remote Windows host name or IP address running dbgsrv.exe.
     pub host: String,
@@ -481,6 +490,30 @@ impl WindbgServer {
     ) -> Result<Json<OpenDumpResult>, String> {
         self.sessions
             .attach_process(pid, noninvasive)
+            .await
+            .map(|(session_id, target)| {
+                Json(OpenDumpResult {
+                    session_id,
+                    target,
+                    retention: "until windbg.close_session or MCP server exit".to_string(),
+                })
+            })
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.attach_kernel",
+        description = "Attach a DbgEng session to a live Windows kernel using KDNET, COM, USB, 1394, named-pipe, SPIPE, or SSL connection options."
+    )]
+    async fn attach_kernel(
+        &self,
+        Parameters(AttachKernelParams {
+            connection,
+            noninvasive,
+        }): Parameters<AttachKernelParams>,
+    ) -> Result<Json<OpenDumpResult>, String> {
+        self.sessions
+            .attach_kernel(&connection, noninvasive)
             .await
             .map(|(session_id, target)| {
                 Json(OpenDumpResult {
