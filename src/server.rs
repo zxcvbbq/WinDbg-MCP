@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     dbgeng,
     ipc::{
-        BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
-        ContextSelection, DebugEvent, DebugServerList, Disassembly, ExecutionAction,
+        BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandJob,
+        CommandResult, ContextSelection, DebugEvent, DebugServerList, Disassembly, ExecutionAction,
         ExecutionResult, ExpressionValue, MemoryRead, MemoryRegion, MemoryWrite, ModuleList,
         ProcessList, RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
         TargetSummary, ThreadList,
@@ -289,6 +289,12 @@ pub struct ExecuteCommandParams {
     pub command: String,
     /// Maximum time to wait for DbgEng to finish the command in milliseconds. Defaults to 300000 (5 minutes), up to 1800000 (30 minutes).
     pub timeout_ms: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CommandJobParams {
+    /// A job ID returned by windbg.start_command.
+    pub job_id: String,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -1063,6 +1069,40 @@ impl WindbgServer {
             .execute_command(&session_id, &command, timeout_ms)
             .await
             .map(|data| Json(SessionResult { session_id, data }))
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.start_command",
+        description = "Start a long-running WinDbg command in the background and return a job ID for polling with windbg.command_status"
+    )]
+    async fn start_command(
+        &self,
+        Parameters(ExecuteCommandParams {
+            session_id,
+            command,
+            timeout_ms,
+        }): Parameters<ExecuteCommandParams>,
+    ) -> Result<Json<CommandJob>, String> {
+        self.sessions
+            .start_command(&session_id, &command, timeout_ms)
+            .await
+            .map(Json)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tool(
+        name = "windbg.command_status",
+        description = "Return the current state and result of a background WinDbg command job"
+    )]
+    async fn command_status(
+        &self,
+        Parameters(CommandJobParams { job_id }): Parameters<CommandJobParams>,
+    ) -> Result<Json<CommandJob>, String> {
+        self.sessions
+            .command_status(&job_id)
+            .await
+            .map(Json)
             .map_err(|error| error.to_string())
     }
 

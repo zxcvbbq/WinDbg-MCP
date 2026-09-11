@@ -12,8 +12,8 @@ use uuid::Uuid;
 use crate::{
     dbgeng,
     ipc::{
-        BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandResult,
-        ContextSelection, DebugEvent, DebugServerList, Disassembly, ExecutionAction,
+        BreakpointAccess, BreakpointInfo, BreakpointKind, BreakpointList, CommandJob,
+        CommandResult, ContextSelection, DebugEvent, DebugServerList, Disassembly, ExecutionAction,
         ExecutionResult, ExpressionValue, MemoryRead, MemoryRegion, MemoryWrite, ModuleList,
         ProcessList, RegisterList, StackTrace, SymbolLookup, SymbolPath, SymbolReload,
         TargetSummary, ThreadList, WorkerRequest, WorkerResponse,
@@ -28,6 +28,7 @@ const MAX_SESSIONS: usize = 4;
 #[derive(Clone)]
 pub struct SessionManager {
     sessions: Arc<RwLock<HashMap<String, Arc<SessionEntry>>>>,
+    jobs: Arc<RwLock<HashMap<String, CommandJob>>>,
     slots: Arc<Semaphore>,
 }
 
@@ -41,6 +42,7 @@ impl Default for SessionManager {
     fn default() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            jobs: Arc::new(RwLock::new(HashMap::new())),
             slots: Arc::new(Semaphore::new(MAX_SESSIONS)),
         }
     }
@@ -662,6 +664,69 @@ impl SessionManager {
             WorkerResponse::Error { code, message } => bail!("{code}: {message}"),
             other => bail!("unexpected worker response for command: {other:?}"),
         }
+    }
+
+    pub async fn start_command(
+        &self,
+        id: &str,
+        command: &str,
+        timeout_ms: Option<u32>,
+    ) -> anyhow::Result<CommandJob> {
+        validate_text("command", command, 4096)?;
+        let timeout = command_timeout(timeout_ms)?;
+        let command = command.trim().to_string();
+        let job_id = Uuid::new_v4().to_string();
+        let job = CommandJob {
+            job_id: job_id.clone(),
+            session_id: id.to_string(),
+            command: command.clone(),
+            status: "running".to_string(),
+            result: None,
+            error: None,
+        };
+        self.jobs.write().await.insert(job_id.clone(), job.clone());
+        let manager = self.clone();
+        let session_id = id.to_string();
+        tokio::spawn(async move {
+            let request = WorkerRequest::ExecuteCommand { command };
+            let response = manager
+                .request_with_timeout(&session_id, request, timeout)
+                .await;
+            let response = match response {
+                Ok(WorkerResponse::CommandOutput(value)) => Ok(value),
+                Ok(WorkerResponse::Error { code, message }) => Err(anyhow!("{code}: {message}")),
+                Ok(other) => Err(anyhow!("unexpected worker response: {other:?}")),
+                Err(error) => {
+                    if error.to_string().contains("DbgEng worker timed out") {
+                        manager.abort_session(&session_id).await;
+                    }
+                    Err(error)
+                }
+            };
+            let mut jobs = manager.jobs.write().await;
+            if let Some(job) = jobs.get_mut(&job_id) {
+                match response {
+                    Ok(result) => {
+                        job.status = "completed".to_string();
+                        job.result = Some(result);
+                    }
+                    Err(error) => {
+                        job.status = "failed".to_string();
+                        job.error = Some(error.to_string());
+                    }
+                }
+            }
+        });
+        Ok(job)
+    }
+
+    pub async fn command_status(&self, job_id: &str) -> anyhow::Result<CommandJob> {
+        self.jobs
+            .read()
+            .await
+            .get(job_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("stale_job: unknown job_id '{job_id}'"))
     }
 
     pub async fn close(&self, id: &str) -> anyhow::Result<()> {
