@@ -14,10 +14,10 @@ native WinDbg commands over stdio.
 
 ```powershell
 claude plugin marketplace add zxcvbbq/WinDbg-MCP
-claude plugin install windbg-mcp@zxcvbbq
+claude plugin install windbg-mcp@windbg-mcp
 
 codex plugin marketplace add zxcvbbq/WinDbg-MCP
-codex plugin add windbg-mcp@zxcvbbq
+codex plugin add windbg-mcp@windbg-mcp
 ```
 
 ## Build from source
